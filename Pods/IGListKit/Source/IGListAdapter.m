@@ -72,6 +72,7 @@
         // dump old registered section controllers in the case that we are changing collection views or setting for
         // the first time
         _registeredCellClasses = [NSMutableSet new];
+        _registeredNibNames = [NSMutableSet new];
         _registeredSupplementaryViewIdentifiers = [NSMutableSet new];
 
         _collectionView = collectionView;
@@ -248,8 +249,8 @@
     if (dataSource == nil || collectionView == nil) {
         if (completion) {
             completion(NO);
-            return;
         }
+        return;
     }
 
     NSArray *newItems = [[dataSource objectsForListAdapter:self] copy];
@@ -386,6 +387,9 @@
     // for IGListSectionController subclasses after calling [super init]
     IGListSectionControllerPushThread(self.viewController, self);
 
+    id firstObject = objects.firstObject;
+    id lastObject = objects.lastObject;
+
     for (id object in objects) {
         // infra checks to see if a controller exists
         IGListSectionController <IGListSectionType> *sectionController = [map sectionControllerForObject:object];
@@ -403,6 +407,8 @@
         // in case the section controller was created outside of -listAdapter:sectionControllerForObject:
         sectionController.collectionContext = self;
         sectionController.viewController = self.viewController;
+        sectionController.isFirstSection = (object == firstObject);
+        sectionController.isLastSection = (object == lastObject);
 
         // check if the item has changed instances or is new
         const NSUInteger oldSection = [map sectionForObject:object];
@@ -441,15 +447,6 @@
         _collectionView.backgroundView = backgroundView;
     }
     _collectionView.backgroundView.hidden = itemCount > 0;
-}
-
-// use the string representation of a reusable view class when registering with a UICollectionView
-- (NSString *)reusableViewIdentifierForClass:(Class)viewClass {
-    return NSStringFromClass(viewClass);
-}
-
-- (NSString *)reusableViewIdentifierForClass:(Class)viewClass elementKind:(NSString *)elementKind {
-    return [elementKind stringByAppendingString:NSStringFromClass(viewClass)];
 }
 
 - (IGListSectionMap *)sectionMapAdjustForUpdateBlock:(BOOL)adjustForUpdateBlock {
@@ -718,9 +715,10 @@
     IGAssertMainThread();
     IGParameterAssert(sectionController != nil);
     IGParameterAssert(cellClass != nil);
+    IGParameterAssert(index >= 0);
     UICollectionView *collectionView = self.collectionView;
     IGAssert(collectionView != nil, @"Reloading adapter without a collection view.");
-    NSString *identifier = [self reusableViewIdentifierForClass:cellClass];
+    NSString *identifier = IGListReusableViewIdentifier(cellClass, nil, nil);
     NSIndexPath *indexPath = [self indexPathForSectionController:sectionController index:index];
     if (![self.registeredCellClasses containsObject:cellClass]) {
         [self.registeredCellClasses addObject:cellClass];
@@ -729,14 +727,37 @@
     return [collectionView dequeueReusableCellWithReuseIdentifier:identifier forIndexPath:indexPath];
 }
 
+- (UICollectionViewCell *)dequeueReusableCellWithNibName:(NSString *)nibName
+                                                  bundle:(NSBundle *)bundle
+                                    forSectionController:(IGListSectionController<IGListSectionType> *)sectionController
+                                                 atIndex:(NSInteger)index {
+    IGAssertMainThread();
+    IGParameterAssert(nibName != nil);
+    IGParameterAssert(sectionController != nil);
+    IGParameterAssert(index >= 0);
+    UICollectionView *collectionView = self.collectionView;
+    IGAssert(collectionView != nil, @"Reloading adapter without a collection view.");
+    NSIndexPath *indexPath = [self indexPathForSectionController:sectionController index:index];
+    if (![self.registeredNibNames containsObject:nibName]) {
+        [self.registeredNibNames addObject:nibName];
+        UINib *nib = [UINib nibWithNibName:nibName bundle:bundle];
+        [collectionView registerNib:nib forCellWithReuseIdentifier:nibName];
+    }
+    return [collectionView dequeueReusableCellWithReuseIdentifier:nibName forIndexPath:indexPath];
+}
+
 - (__kindof UICollectionReusableView *)dequeueReusableSupplementaryViewOfKind:(NSString *)elementKind
                                                          forSectionController:(IGListSectionController <IGListSectionType> *)sectionController
                                                                         class:(Class)viewClass
                                                                       atIndex:(NSInteger)index {
     IGAssertMainThread();
+    IGParameterAssert(elementKind.length > 0);
+    IGParameterAssert(sectionController != nil);
+    IGParameterAssert(viewClass != nil);
+    IGParameterAssert(index >= 0);
     UICollectionView *collectionView = self.collectionView;
     IGAssert(collectionView != nil, @"Reloading adapter without a collection view.");
-    NSString *identifier = [self reusableViewIdentifierForClass:viewClass elementKind:elementKind];
+    NSString *identifier = IGListReusableViewIdentifier(viewClass, nil, elementKind);
     NSIndexPath *indexPath = [self indexPathForSectionController:sectionController index:index];
     if (![self.registeredSupplementaryViewIdentifiers containsObject:identifier]) {
         [self.registeredSupplementaryViewIdentifiers addObject:identifier];
